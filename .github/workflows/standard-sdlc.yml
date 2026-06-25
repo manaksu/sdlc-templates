@@ -1,0 +1,102 @@
+name: Standard SDLC
+
+# Reusable pipeline. Other repos call it with:
+#
+#   jobs:
+#     sdlc:
+#       uses: manaksu/sdlc-templates/.github/workflows/standard-sdlc.yml@v1
+#
+# Every job below runs in PARALLEL except where `needs:` declares a dependency.
+# All real work is delegated to `make <target>` so the SAME commands run
+# locally and in CI. Each project's Makefile decides what each verb means.
+
+on:
+  workflow_call:
+    inputs:
+      enable_codeql:
+        description: "Run GitHub CodeQL SAST (only for CodeQL-supported languages)"
+        type: boolean
+        default: false
+      codeql_languages:
+        description: "Comma list for CodeQL, e.g. 'python,javascript'"
+        type: string
+        default: "python"
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  # ───────────── PARALLEL GROUP 1: static quality ─────────────
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: make lint
+
+  format-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: make format-check
+
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: make typecheck
+
+  # ───────────── PARALLEL GROUP 2: tests ─────────────
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: make test-unit
+
+  integration-tests:
+    needs: [unit-tests]                # gated: only after unit tests pass
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: make test-integration
+
+  # ───────────── PARALLEL GROUP 3: security ─────────────
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
+
+  dependency-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+  sast:
+    if: ${{ inputs.enable_codeql }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ inputs.codeql_languages }}
+      - uses: github/codeql-action/autobuild@v3
+      - uses: github/codeql-action/analyze@v3
+
+  # ───────────── GATED: build (after static quality) ─────────────
+  build:
+    needs: [lint, typecheck, format-check]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: make build
