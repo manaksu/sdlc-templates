@@ -1,0 +1,64 @@
+name: Code Review
+
+# Reusable INDEPENDENT code-review agent. A project calls this from a workflow
+# triggered on pull_request. A fresh-context Claude reviews ONLY the PR diff and
+# posts findings as review comments — the semantic layer that lint/tests can't give
+# (especially for platforms CI can't compile, like Garmin/Pebble).
+#
+# It ADVISES only: it never approves, merges, or pushes. A human still decides.
+#
+#   jobs:
+#     review:
+#       uses: ManaksAI/sdlc-templates/.github/workflows/code-review.yml@v1
+#       secrets: inherit
+#
+# PREREQUISITES (already satisfied org-wide on ManaksAI): ANTHROPIC_API_KEY,
+# read/write default token, and the Claude Code GitHub App installed.
+
+on:
+  workflow_call:
+    inputs:
+      model:
+        type: string
+        default: "claude-opus-4-8"
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write        # claude-code-action authenticates via OIDC
+      contents: read         # read the diff (no writes — review only)
+      pull-requests: write   # post review comments
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: anthropics/claude-code-action@v1
+        with:
+          # Read-only toolset — the reviewer inspects but never edits.
+          claude_args: |
+            --model ${{ inputs.model }}
+            --allowedTools Bash,Read,Glob,Grep
+          prompt: |
+            You are an INDEPENDENT code reviewer for pull request
+            #${{ github.event.pull_request.number }} in ${{ github.repository }}.
+            Review ONLY the changes in this PR's diff (not the whole repo).
+
+            Look for, in priority order:
+            1. Correctness bugs, logic errors, unhandled edge cases.
+            2. Mismatches with the linked issue's acceptance criteria (read the
+               linked issue if the PR says "Closes #N").
+            3. Security issues, unsafe assumptions, resource leaks.
+            4. Problems automated lint/tests CANNOT catch — especially for platforms
+               CI can't compile here (e.g. Monkey C / Garmin, C / Pebble): API misuse,
+               wrong types, rendering/layout logic that won't behave as intended.
+
+            Post your findings as a PR review with specific, actionable comments that
+            reference file and line. Be concise — prioritize real issues over style
+            nits. If the change looks correct, say so briefly.
+
+            HARD RULES: Do NOT approve, merge, push, or edit code. You review and
+            comment only — a human makes the merge decision.
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
