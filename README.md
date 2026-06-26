@@ -63,7 +63,7 @@ the only thing the pipeline "designs" — GitHub schedules the concurrency.
 ## 3. Start a NEW project (born compliant)
 
 ```bash
-gh repo create my-project --private --template manaksu/project-template --clone
+gh repo create my-project --private --template ManaksAI/project-template --clone
 # or use the shell shortcut:  newproj my-project
 cd my-project
 ```

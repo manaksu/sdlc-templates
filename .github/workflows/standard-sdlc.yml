@@ -4,7 +4,7 @@ name: Standard SDLC
 #
 #   jobs:
 #     sdlc:
-#       uses: manaksu/sdlc-templates/.github/workflows/standard-sdlc.yml@v1
+#       uses: ManaksAI/sdlc-templates/.github/workflows/standard-sdlc.yml@v1
 #
 # Every job below runs in PARALLEL except where `needs:` declares a dependency.
 # All real work is delegated to `make <target>` so the SAME commands run

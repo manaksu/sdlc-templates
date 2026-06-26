@@ -48,7 +48,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/checkout@v4          # the templates repo (for the triage script)
         with:
-          repository: manaksu/sdlc-templates
+          repository: ManaksAI/sdlc-templates
           ref: v1
           path: .sdlc
       - uses: actions/setup-python@v5

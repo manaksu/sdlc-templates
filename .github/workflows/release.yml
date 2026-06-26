@@ -7,7 +7,7 @@ name: Release
 #
 #   jobs:
 #     release:
-#       uses: manaksu/sdlc-templates/.github/workflows/release.yml@v1
+#       uses: ManaksAI/sdlc-templates/.github/workflows/release.yml@v1
 #       with:
 #         artifact_glob: "dist/*"      # optional; omit for a notes-only release
 #
