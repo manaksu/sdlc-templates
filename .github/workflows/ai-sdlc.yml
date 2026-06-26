@@ -73,6 +73,11 @@ jobs:
     needs: triage
     if: ${{ inputs.auto_implement && needs.triage.outputs.proceed == 'true' }}
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write        # claude-code-action authenticates via OIDC
+      contents: write        # create branches / commit
+      pull-requests: write   # open the PR
+      issues: write          # comment / label on escalation
     steps:
       - uses: actions/checkout@v4
         with:
