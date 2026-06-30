@@ -30,6 +30,10 @@ run — no per-project edits.
 - **project-template** — a GitHub *template repo*; new projects are created from
   it and are born wired into the pipeline.
 
+> **Docs:** [`PLAYBOOK.md`](PLAYBOOK.md) — stand up the multi-agent SDLC from scratch ·
+> [`SANDBOX-ORCHESTRATOR.md`](SANDBOX-ORCHESTRATOR.md) — scale out to parallel worktree
+> sandboxes + a learning log for large, splittable requirements.
+
 ---
 
 ## 2. The two pipelines
