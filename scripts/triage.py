@@ -22,6 +22,12 @@ title = os.environ.get("ISSUE_TITLE", "")
 body = os.environ.get("ISSUE_BODY", "") or "(no description provided)"
 labels = json.loads(os.environ.get("ISSUE_LABELS", "[]"))
 
+# Label names are configurable so the parallel orchestrator can use its own
+# (`requirement-parallel` / `approved-parallel`) without colliding with the
+# single-agent flow's `requirement` / `approved`. Defaults preserve v1 behavior.
+APPROVE_LABEL = os.environ.get("APPROVE_LABEL", "approved")
+REQUIREMENT_LABEL = os.environ.get("REQUIREMENT_LABEL", "requirement")
+
 # Repo file list grounds the analysis in the actual codebase (truncated).
 try:
     files = subprocess.check_output(["git", "ls-files"], text=True).splitlines()
@@ -87,7 +93,7 @@ needs = bool(a["needs_human_review"]) or a["risk_level"] == "high" or sensitive_
 # Human-approval override: if a reviewer has added the `approved` label, the gate
 # opens regardless of the analysis — the human has signed off. This turns
 # "needs review" from a dead end into a checkpoint.
-approved = "approved" in labels
+approved = APPROVE_LABEL in labels
 needs_effective = needs and not approved
 
 reasons = list(a["reasons"])
@@ -135,16 +141,16 @@ if needs_effective:
         check=False,
     )
     subprocess.run(
-        ["gh", "label", "create", "approved", "--color", "0E8A16",
-         "--description", "Human approved — let the pipeline implement",
+        ["gh", "label", "create", APPROVE_LABEL, "--color", "0E8A16",
+         "--description", "Human approved — let the pipeline proceed",
          "--repo", REPO],
         check=False,
     )
     gh("issue", "edit", ISSUE, "--add-label", "needs-human", check=False)
     gh("issue", "comment", ISSUE,
-       "--body", "⚠️ **Human review required — pipeline paused.** Review the analysis above. "
-                 "If it looks right, add the **`approved`** label to let the Developer agent proceed; "
-                 "otherwise edit the requirement and re-toggle the `requirement` label.")
+       "--body", f"⚠️ **Human review required — pipeline paused.** Review the analysis above. "
+                 f"If it looks right, add the **`{APPROVE_LABEL}`** label to let the pipeline proceed; "
+                 f"otherwise edit the requirement and re-toggle the `{REQUIREMENT_LABEL}` label.")
 elif approved and needs:
     # Human overrode the gate — clear the paused flag and note it.
     gh("issue", "edit", ISSUE, "--remove-label", "needs-human", check=False)

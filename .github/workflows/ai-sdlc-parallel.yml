@@ -64,6 +64,10 @@ jobs:
           ISSUE_TITLE: ${{ github.event.issue.title }}
           ISSUE_BODY: ${{ github.event.issue.body }}
           ISSUE_LABELS: ${{ toJson(github.event.issue.labels.*.name) }}
+          # Parallel flow uses its own labels so it never collides with the
+          # single-agent ai-sdlc.yml (which owns `requirement` / `approved`).
+          APPROVE_LABEL: approved-parallel
+          REQUIREMENT_LABEL: requirement-parallel
         run: python .sdlc/scripts/triage.py
 
   # ───────────── 2. PLAN: decompose + ownership map (then STOP for review) ─────────────
