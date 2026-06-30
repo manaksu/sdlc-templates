@@ -1,0 +1,194 @@
+name: AI SDLC (parallel)
+
+# Parallel-sandbox evolution of ai-sdlc.yml. See SANDBOX-ORCHESTRATOR.md.
+#
+# Active flow (safe by default):
+#   1. triage : reuse scripts/triage.py — analyze the requirement, post analysis, decide if a
+#               human is needed (proceed=true|false).  [same gate as the base pipeline]
+#   2. plan   : scripts/plan.py — decompose into independent, file-fenced slices, write the
+#               ownership map (.wave/ownership.json), post the plan, and STOP for human review.
+#
+#   3. build  : (opt-in via auto_implement) fan out one claude-code-action agent per slice,
+#               each fenced to its `owns` globs, each opening its OWN pull request.
+#
+# The integrate + defect-triage loop (merge slices → run CI → route failures to owners) is the
+# NEXT increment — still scaffolded as commented YAML at the bottom. AI never merges/deploys;
+# a human reviews and merges the per-slice PRs.
+#
+# PREREQUISITES on the caller repo (same as ai-sdlc.yml):
+#   • secret ANTHROPIC_API_KEY (via `secrets: inherit`)
+#   • default workflow token = "Read and write"
+#   • the caller repo must carry docs/learning-log/ (the plan reads its INDEX for grounding)
+
+on:
+  workflow_call:
+    inputs:
+      model:
+        description: "Model for the build agents (the ones that write code)"
+        type: string
+        default: "claude-opus-4-8"
+      analysis_model:
+        description: "Cheaper model for triage + planning (no code-writing)"
+        type: string
+        default: "claude-sonnet-4-6"
+      max_sandboxes:
+        description: "Cap on parallel slices the planner may propose"
+        type: number
+        default: 4
+      templates_ref:
+        description: "Ref of sdlc-templates to load triage.py / plan.py from"
+        type: string
+        default: "v1"
+      auto_implement:
+        description: "Fan out parallel build agents (one PR per slice) after planning"
+        type: boolean
+        default: false
+
+# No top-level permissions block — relies on the caller's default token (must be read/write).
+# Declaring permissions here would be validated at startup and fail read-only repos.
+
+jobs:
+  # ───────────── 1. ANALYZE + human gate (reused) ─────────────
+  triage:
+    runs-on: ubuntu-latest
+    outputs:
+      proceed: ${{ steps.analyze.outputs.proceed }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/checkout@v4
+        with:
+          repository: ManaksAI/sdlc-templates
+          ref: ${{ inputs.templates_ref }}
+          path: .sdlc
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -q anthropic
+      - id: analyze
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          MODEL: ${{ inputs.analysis_model }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          ISSUE_LABELS: ${{ toJson(github.event.issue.labels.*.name) }}
+          # Parallel flow uses its own labels so it never collides with the
+          # single-agent ai-sdlc.yml (which owns `requirement` / `approved`).
+          APPROVE_LABEL: approved-parallel
+          REQUIREMENT_LABEL: requirement-parallel
+        run: python .sdlc/scripts/triage.py
+
+  # ───────────── 2. PLAN: decompose + ownership map (then STOP for review) ─────────────
+  plan:
+    needs: triage
+    if: ${{ needs.triage.outputs.proceed == 'true' }}
+    runs-on: ubuntu-latest
+    outputs:
+      parallelizable: ${{ steps.plan.outputs.parallelizable }}
+      count: ${{ steps.plan.outputs.count }}
+      slices: ${{ steps.plan.outputs.slices }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/checkout@v4
+        with:
+          repository: ManaksAI/sdlc-templates
+          ref: ${{ inputs.templates_ref }}
+          path: .sdlc
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -q anthropic
+      - id: plan
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          MODEL: ${{ inputs.analysis_model }}
+          MAX_SANDBOXES: ${{ inputs.max_sandboxes }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+        run: python .sdlc/scripts/plan.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ownership-map
+          path: .wave/ownership.json
+          if-no-files-found: ignore
+
+  # ───────────── 3. BUILD: one fenced agent per slice (opt-in), each opens a PR ─────────────
+  build:
+    needs: plan
+    if: ${{ inputs.auto_implement && needs.plan.outputs.parallelizable == 'true' }}
+    strategy:
+      fail-fast: false
+      max-parallel: ${{ inputs.max_sandboxes }}
+      matrix:
+        slice: ${{ fromJSON(needs.plan.outputs.slices) }}
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write        # claude-code-action authenticates via OIDC
+      contents: write        # create the slice branch / commit
+      pull-requests: write   # open the slice PR
+      issues: write          # comment on escalation
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: anthropics/claude-code-action@v1
+        with:
+          claude_args: |
+            --model ${{ inputs.model }}
+            --allowedTools Bash,Edit,Read,Write,Glob,Grep
+          prompt: |
+            You are ONE sandbox in a parallel build of issue #${{ github.event.issue.number }}
+            ("${{ github.event.issue.title }}") in ${{ github.repository }}.
+            Build ONLY the "${{ matrix.slice.name }}" slice.
+
+            Goal: ${{ matrix.slice.goal }}
+            Done when: ${{ matrix.slice.done }}
+
+            FENCE — you may create or modify ONLY these paths:
+              ${{ join(matrix.slice.owns, ', ') }}
+            Every other file is READ-ONLY. If you genuinely need to change a file outside this
+            fence, STOP and comment on issue #${{ github.event.issue.number }} explaining why —
+            do NOT reach across (that is a planning error to escalate, not to work around).
+
+            Steps, in order:
+            1. Create and switch to a new branch: ${{ matrix.slice.branch }}
+            2. Implement the slice within the fence. Add unit tests covering standard, positive,
+               negative, and edge cases.
+            3. Run `make ci` and fix what you can within your fence. If it cannot pass because of
+               something outside your fence, note that clearly in the PR body.
+            4. Open a pull request to `main` titled
+               "Part of #${{ github.event.issue.number }}: ${{ matrix.slice.name }}", with a body
+               that starts with "Part of #${{ github.event.issue.number }}" (NOT "Closes" — this
+               is one of several parallel slices) and summarizes what you built.
+
+            HARD RULES: NEVER merge. NEVER deploy. Stay strictly inside your fence.
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+# ════════════════════════════════════════════════════════════════════════════════════════
+# NEXT INCREMENT (still scaffolding) — integrate + defect-triage. Turn on after the build
+# fan-out proves out. Merges the per-slice branches, runs the full suite, and routes failures
+# to the owning sandbox via scripts/triage-owner.mjs against .wave/ownership.json.
+#
+#   integrate:
+#     needs: build
+#     runs-on: ubuntu-latest
+#     permissions: { contents: write, pull-requests: write, issues: write }
+#     steps:
+#       - uses: actions/checkout@v4
+#         with: { fetch-depth: 0 }
+#       - uses: actions/download-artifact@v4
+#         with: { name: ownership-map, path: .wave }
+#       # merge slice branches smallest-first → run `make ci` → on failure:
+#       #   node scripts/triage-owner.mjs <implicated files>   (route to the owning sandbox)
+#       # then open ONE PR to main "Closes #<issue>". Human merges. AI never merges/deploys.
+# ════════════════════════════════════════════════════════════════════════════════════════
