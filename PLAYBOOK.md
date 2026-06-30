@@ -31,7 +31,7 @@ secret-scan / dependency-scan / optional SAST / build) on every push & PR.
 
 **Design principles**
 - **Rules defined once** in a central repo; every project references them (`uses: ORG/sdlc-templates/...@v1`). Fix once → all repos get it.
-- **Multi-agent, but minimal**: Analyst, Developer, Reviewer — each justified by a distinct role + clean handoff. Don't split further (planner/test-writer/etc.) until a single agent visibly struggles.
+- **Multi-agent, but minimal**: Analyst, Developer, Reviewer — each justified by a distinct role + clean handoff. Don't split further (planner/test-writer/etc.) until a single agent visibly struggles. When it does — large requirements that split into independent slices — see the scale-out design in [`SANDBOX-ORCHESTRATOR.md`](SANDBOX-ORCHESTRATOR.md) (parallel git-worktree sandboxes + a learning log).
 - **Human-in-the-loop gates** at: needs-review escalation, PR merge, and deploy. AI never merges or deploys.
 - **Everything event-driven & label-gated** → zero cost until a requirement is actually filed.
 
